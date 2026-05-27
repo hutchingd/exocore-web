@@ -82,8 +82,6 @@ RUN mkdir -p \
         /app/uploads/avatars \
  && chown -R exocore:exocore /app
 
-VOLUME ["/app/projects", "/app/uploads"]
-
 RUN mkdir -p /tmp/exo-cache && chown exocore:exocore /tmp/exo-cache
 
 USER exocore
