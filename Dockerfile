@@ -15,7 +15,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ───── Stage 1: install production deps (needs build tools for node-pty) ──────
-FROM node:20-slim AS builder
+FROM node:20 AS builder
 
 WORKDIR /app
 
@@ -24,19 +24,20 @@ ENV PUPPETEER_SKIP_DOWNLOAD=1 \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false
 
-# Build tools needed to compile node-pty native bindings.
-RUN apt-get update -qq \
- && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+ && apt-get install -y \
         python3 make g++ ca-certificates \
+        build-essential cmake \
+        curl wget git \
+        gcc gdb \
+        libc6-dev libssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Install production deps only — no dev tools, no vite, no tsx needed.
 COPY package*.json ./
 RUN npm install --omit=dev --legacy-peer-deps --no-audit --no-fund
 
-
-# ───── Stage 2: minimal runtime ───────────────────────────────────────────────
-FROM node:20-slim AS runner
+# ───── Stage 2: runtime - fully root, no restrictions ─────────────────────────
+FROM node:20 AS runner
 
 LABEL org.opencontainers.image.title="Exocore IDE"
 LABEL org.opencontainers.image.description="Browser-based IDE — full stack, any language"
@@ -48,43 +49,35 @@ ENV NODE_ENV=production \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 \
     NODE_OPTIONS="--max-old-space-size=384"
 
-# Bare-minimum runtime OS packages.
-RUN apt-get update -qq \
- && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+ && apt-get install -y \
         ca-certificates curl tini procps \
         bash coreutils \
         git unzip zip \
         python3 python3-pip python3-venv \
+        sudo vim nano htop \
+        build-essential gcc g++ make \
+        openssh-client \
+        wget net-tools \
+        strace ltrace \
+        gdb valgrind \
+        tree jq \
+        rsync \
  && rm -rf /var/lib/apt/lists/* \
  && rm -rf /var/cache/apt/archives/*
 
 WORKDIR /app
 
-# Non-root user.
-RUN groupadd --system --gid 1001 exocore \
- && useradd  --system --uid 1001 --gid exocore --create-home --shell /bin/bash exocore
+COPY --from=builder /app/node_modules ./node_modules
+COPY dist/ ./dist/
+COPY package.json ./
 
-# ── Copy only what the runtime needs ──────────────────────────────────────────
-# Production node_modules (with node-pty native .node binary compiled above).
-COPY --from=builder --chown=exocore:exocore /app/node_modules  ./node_modules
-
-# Pre-built + obfuscated server + browser assets (all in dist/).
-COPY --chown=exocore:exocore dist/ ./dist/
-
-# Root package.json (needed for version API + node_modules resolution).
-COPY --chown=exocore:exocore package.json ./
-
-# ── Persistent data directories ────────────────────────────────────────────────
 RUN mkdir -p \
         /app/projects \
         /app/projects_archive \
         /app/uploads/temp \
         /app/uploads/avatars \
- && chown -R exocore:exocore /app
-
-RUN mkdir -p /tmp/exo-cache && chown exocore:exocore /tmp/exo-cache
-
-USER exocore
+        /tmp/exo-cache
 
 EXPOSE 5000
 
